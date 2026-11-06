@@ -1,0 +1,8 @@
+*.md
+*.MD
+*.txt
+cookies.txt
+Mp3s/
+tmp_upload/
+__pycache__/
+*.pyc
