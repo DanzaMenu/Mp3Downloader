@@ -1,4 +1,4 @@
-# Version: 1.0.0
+# Version: 1.0.1
 
 import sys
 import os
@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QColor, QPalette
 
-CURRENT_VERSION = "1.0.0"
+CURRENT_VERSION = "1.0.1"
 GITHUB_API_URL = "https://api.github.com/repos/DanzaMenu/HeroCardsV1.0.0/releases/latest"
 SCRIPT_PATH = os.path.abspath(__file__)
 SCRIPT_DIR = os.path.dirname(SCRIPT_PATH)
@@ -193,6 +193,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._just_updated = just_updated
         self.setWindowTitle(f"Hero Cards  |  v{CURRENT_VERSION}  —  Checking for updates...")
+        # 1.0.1
         self.setMinimumSize(900, 620)
 
         palette = self.palette()
