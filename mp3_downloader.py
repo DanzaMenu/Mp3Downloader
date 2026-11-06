@@ -10,7 +10,7 @@ import urllib.request
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout,
     QHBoxLayout, QLineEdit, QPushButton, QLabel,
-    QProgressBar, QListWidget, QListWidgetItem, QMessageBox
+    QProgressBar, QListWidget, QListWidgetItem, QMessageBox, QCheckBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, QTimer
 from PyQt6.QtGui import QFont, QColor, QLinearGradient, QPainter, QBrush, QPen
@@ -305,6 +305,39 @@ class MainWindow(QMainWindow):
         input_row.addWidget(add_btn)
         root.addLayout(input_row)
 
+        # ── Clipboard watch checkbox ───────────────────────────────
+        self.clip_check = QCheckBox("Auto-add copied links")
+        self.clip_check.setFont(QFont("Tahoma", 8))
+        self.clip_check.setStyleSheet("""
+            QCheckBox {
+                color: rgba(200,200,200,170);
+                spacing: 6px;
+            }
+            QCheckBox::indicator {
+                width: 14px;
+                height: 14px;
+                border: 1px solid rgba(180,120,255,100);
+                border-radius: 3px;
+                background: rgba(255,255,255,8);
+            }
+            QCheckBox::indicator:checked {
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
+                    stop:0 rgba(130,55,255,220), stop:1 rgba(75,25,200,200));
+                border: 1px solid rgba(180,120,255,180);
+                image: none;
+            }
+            QCheckBox::indicator:hover {
+                border: 1px solid rgba(180,120,255,200);
+            }
+        """)
+        self.clip_check.stateChanged.connect(self._on_clip_toggle)
+        root.addWidget(self.clip_check)
+
+        self._last_clip = ""
+        self._clip_timer = QTimer()
+        self._clip_timer.setInterval(500)
+        self._clip_timer.timeout.connect(self._poll_clipboard)
+
         # ── Queue list ────────────────────────────────────────────
         self.queue_list = QListWidget()
         self.queue_list.setFont(QFont("Tahoma", 8))
@@ -462,8 +495,10 @@ class MainWindow(QMainWindow):
     def _on_check_complete(self):
         self.title_lbl.setText(f"Mp3 Downloader  |  v{CURRENT_VERSION}")
         if self._update_error:
-            QMessageBox.warning(self, "Update Check Failed",
-                f"Could not check for updates:\n{self._update_error}")
+            # 404 = no releases yet, silently ignore
+            if "404" not in self._update_error and "HTTP Error 404" not in self._update_error:
+                QMessageBox.warning(self, "Update Check Failed",
+                    f"Could not check for updates:\n{self._update_error}")
             return
         latest, url = self._update_result
         if not latest or _parse_version(latest) <= _parse_version(CURRENT_VERSION):
@@ -490,6 +525,30 @@ class MainWindow(QMainWindow):
                 QApplication.quit()
             except Exception as e:
                 QMessageBox.critical(self, "Update Failed", f"Download failed:\n{e}")
+
+    def _on_clip_toggle(self, state):
+        if state == Qt.CheckState.Checked.value:
+            self._last_clip = QApplication.clipboard().text().strip()
+            self._clip_timer.start()
+        else:
+            self._clip_timer.stop()
+
+    def _poll_clipboard(self):
+        text = QApplication.clipboard().text().strip()
+        if text == self._last_clip:
+            return
+        self._last_clip = text
+        if not text.startswith(("http://", "https://")):
+            return
+        # dupe check
+        for i in range(self.queue_list.count()):
+            if self.queue_list.item(i).data(Qt.ItemDataRole.UserRole) == text:
+                return
+        item = QListWidgetItem(text)
+        item.setData(Qt.ItemDataRole.UserRole, text)
+        self.queue_list.addItem(item)
+        self.status_lbl.setStyleSheet("color: rgba(200,200,200,160);")
+        self.status_lbl.setText(f"{self.queue_list.count()} URL{'s' if self.queue_list.count() != 1 else ''} queued.")
 
     def _add_to_queue(self):
         url = self.url_input.text().strip()
