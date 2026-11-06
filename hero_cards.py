@@ -1,13 +1,63 @@
 # Version: 1.0.0
 
 import sys
+import os
+import json
+import shutil
+import subprocess
+import urllib.request
+import threading
 import random
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QGridLayout,
-    QVBoxLayout, QHBoxLayout, QLabel, QFrame, QScrollArea
+    QVBoxLayout, QHBoxLayout, QLabel, QFrame, QScrollArea, QMessageBox
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QColor, QPalette
+
+CURRENT_VERSION = "1.0.0"
+GITHUB_API_URL = "https://api.github.com/repos/DanzaMenu/HeroCardsV1.0.0/releases/latest"
+SCRIPT_PATH = os.path.abspath(__file__)
+
+
+def _parse_version(v: str):
+    return tuple(int(x) for x in v.lstrip("v").split("."))
+
+
+def check_for_update(callback):
+    def _check():
+        try:
+            req = urllib.request.Request(GITHUB_API_URL, headers={"User-Agent": "HeroCards-Updater"})
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                data = json.loads(resp.read().decode())
+            latest_tag = data.get("tag_name", "").lstrip("v")
+            if not latest_tag:
+                return
+            if _parse_version(latest_tag) > _parse_version(CURRENT_VERSION):
+                assets = data.get("assets", [])
+                dl_url = next(
+                    (a["browser_download_url"] for a in assets if a["name"] == "hero_cards.py"),
+                    None
+                )
+                callback(latest_tag, dl_url)
+        except Exception:
+            pass
+    threading.Thread(target=_check, daemon=True).start()
+
+
+def perform_update(url: str, new_version: str):
+    try:
+        backup = SCRIPT_PATH + ".bak"
+        shutil.copy2(SCRIPT_PATH, backup)
+        req = urllib.request.Request(url, headers={"User-Agent": "HeroCards-Updater"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            new_code = resp.read()
+        with open(SCRIPT_PATH, "wb") as f:
+            f.write(new_code)
+        subprocess.Popen([sys.executable, SCRIPT_PATH])
+        QApplication.quit()
+    except Exception as e:
+        QMessageBox.critical(None, "Update Failed", f"Could not apply update:\n{e}")
 
 HEROES = [
     {"name": "Aethon Blaze", "role": "Warrior", "hp": 920, "atk": 310, "def": 280, "rarity": "Legendary"},
@@ -164,6 +214,26 @@ class MainWindow(QMainWindow):
 
         scroll.setWidget(container)
         self.setCentralWidget(scroll)
+
+        QTimer.singleShot(1500, self._start_update_check)
+
+    def _start_update_check(self):
+        check_for_update(self._on_update_found)
+
+    def _on_update_found(self, new_version: str, dl_url: str):
+        QTimer.singleShot(0, lambda: self._prompt_update(new_version, dl_url))
+
+    def _prompt_update(self, new_version: str, dl_url: str):
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Update Available")
+        msg.setText(f"A new version is available: <b>v{new_version}</b><br>You are on v{CURRENT_VERSION}.<br><br>Update now?")
+        msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        msg.setDefaultButton(QMessageBox.StandardButton.Yes)
+        if msg.exec() == QMessageBox.StandardButton.Yes:
+            if dl_url:
+                perform_update(dl_url, new_version)
+            else:
+                QMessageBox.warning(self, "Update Error", "No downloadable asset found for this release.")
 
 
 def main():
