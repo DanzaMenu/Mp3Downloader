@@ -1,4 +1,4 @@
-# Version: 1.0.0
+# Version: 1.0.1
 
 import sys
 import os
@@ -7,17 +7,18 @@ import time
 import subprocess
 import threading
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout,
     QHBoxLayout, QLineEdit, QPushButton, QLabel,
-    QProgressBar, QListWidget, QListWidgetItem, QMessageBox, QCheckBox
+    QProgressBar, QListWidget, QListWidgetItem, QMessageBox, QCheckBox, QSpinBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, QTimer
 from PyQt6.QtGui import QFont, QColor, QLinearGradient, QPainter, QBrush, QPen
 import yt_dlp
 
 # ── App identity ───────────────────────────────────────────────────────────────
-CURRENT_VERSION = "1.0.0"
+CURRENT_VERSION = "1.0.1"
 GITHUB_API_URL  = "https://api.github.com/repos/DanzaMenu/Mp3Downloader/releases/latest"
 SCRIPT_PATH     = os.path.abspath(__file__)
 SCRIPT_DIR      = os.path.dirname(SCRIPT_PATH)
@@ -154,16 +155,28 @@ def _download_one(url: str) -> bool:
     return False
 
 
-def download_queue(urls: list):
+def download_queue(urls: list, thread_count: int = 1):
     os.makedirs(MP3_DIR, exist_ok=True)
     total = len(urls)
-    for i, url in enumerate(urls, 1):
-        signals.progress_update.emit(-1, f"Downloading {i} of {total}...")
-        signals.queue_item_update.emit(i - 1, "downloading")
+    completed = [0]
+    lock = threading.Lock()
+
+    def _task(idx, url):
+        signals.queue_item_update.emit(idx, "downloading")
         ok = _download_one(url)
-        signals.queue_item_update.emit(i - 1, "done" if ok else "failed")
-        if not ok:
-            signals.status_update.emit(f"Failed ({i}/{total}): {url[:60]}", "#ed4245")
+        signals.queue_item_update.emit(idx, "done" if ok else "failed")
+        with lock:
+            completed[0] += 1
+            pct = int(completed[0] / total * 100)
+        signals.progress_update.emit(pct, f"Downloaded {completed[0]} of {total}...")
+        return ok
+
+    with ThreadPoolExecutor(max_workers=thread_count) as pool:
+        futures = {pool.submit(_task, i, url): url for i, url in enumerate(urls)}
+        for future in as_completed(futures):
+            if not future.result():
+                signals.status_update.emit(f"Failed: {futures[future][:60]}", "#ed4245")
+
     signals.progress_update.emit(100, f"Done — {total} file{'s' if total != 1 else ''} saved.")
     signals.download_finished.emit()
 
@@ -377,7 +390,7 @@ class MainWindow(QMainWindow):
         self.queue_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
         root.addWidget(self.queue_list)
 
-        # ── Clear + Download All buttons ──────────────────────────
+        # ── Clear + threads + Download All ────────────────────────
         action_row = QHBoxLayout()
         action_row.setSpacing(8)
 
@@ -403,6 +416,29 @@ class MainWindow(QMainWindow):
         """)
         self.clear_btn.clicked.connect(self._clear_queue)
 
+        thread_lbl = QLabel("Threads:")
+        thread_lbl.setFont(QFont("Tahoma", 8))
+        thread_lbl.setStyleSheet("color: rgba(200,200,200,160);")
+
+        self.thread_spin = QSpinBox()
+        self.thread_spin.setRange(1, 10)
+        self.thread_spin.setValue(1)
+        self.thread_spin.setFixedSize(52, 36)
+        self.thread_spin.setFont(QFont("Tahoma", 9))
+        self.thread_spin.setStyleSheet("""
+            QSpinBox {
+                background: rgba(255,255,255,10);
+                border: 1px solid rgba(180,120,255,70);
+                border-radius: 10px;
+                color: #FFFFFF;
+                padding: 0px 6px;
+            }
+            QSpinBox::up-button, QSpinBox::down-button {
+                width: 0; border: none;
+            }
+            QSpinBox:focus { outline: none; border: 1px solid rgba(180,120,255,200); }
+        """)
+
         self.dl_btn = QPushButton("Download All")
         self.dl_btn.setFixedHeight(36)
         self.dl_btn.setFont(QFont("Tahoma", 9))
@@ -410,6 +446,8 @@ class MainWindow(QMainWindow):
         self.dl_btn.clicked.connect(self._start_download)
 
         action_row.addWidget(self.clear_btn, stretch=1)
+        action_row.addWidget(thread_lbl)
+        action_row.addWidget(self.thread_spin)
         action_row.addWidget(self.dl_btn, stretch=3)
         root.addLayout(action_row)
 
@@ -576,9 +614,11 @@ class MainWindow(QMainWindow):
         urls = [self.queue_list.item(i).data(Qt.ItemDataRole.UserRole) for i in range(count)]
         self.dl_btn.setEnabled(False)
         self.clear_btn.setEnabled(False)
+        self.thread_spin.setEnabled(False)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        threading.Thread(target=download_queue, args=(urls,), daemon=True).start()
+        threads = self.thread_spin.value()
+        threading.Thread(target=download_queue, args=(urls, threads), daemon=True).start()
 
     def _on_queue_item(self, row: int, state: str):
         item = self.queue_list.item(row)
@@ -612,6 +652,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(100)
         self.dl_btn.setEnabled(True)
         self.clear_btn.setEnabled(True)
+        self.thread_spin.setEnabled(True)
 
 
 def main():
