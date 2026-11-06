@@ -3,11 +3,10 @@
 import sys
 import os
 import json
-import shutil
+import time
 import subprocess
 import urllib.request
 import threading
-import random
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QGridLayout,
     QVBoxLayout, QHBoxLayout, QLabel, QFrame, QScrollArea, QMessageBox
@@ -18,60 +17,79 @@ from PyQt6.QtGui import QFont, QColor, QPalette
 CURRENT_VERSION = "1.0.0"
 GITHUB_API_URL = "https://api.github.com/repos/DanzaMenu/HeroCardsV1.0.0/releases/latest"
 SCRIPT_PATH = os.path.abspath(__file__)
+SCRIPT_DIR = os.path.dirname(SCRIPT_PATH)
+UPDATE_FILE = os.path.join(SCRIPT_DIR, "hero_cards_update.py")
 
 
 def _parse_version(v: str):
     return tuple(int(x) for x in v.lstrip("v").split("."))
 
 
-def check_for_update(callback):
-    def _check():
+# ─── Update logic ────────────────────────────────────────────────────────────
+
+def handle_update_file():
+    """If we were launched as _update.py, rename ourselves and relaunch."""
+    if SCRIPT_PATH.endswith("hero_cards_update.py"):
+        target = os.path.join(SCRIPT_DIR, "hero_cards.py")
+        time.sleep(1)
         try:
-            req = urllib.request.Request(GITHUB_API_URL, headers={"User-Agent": "HeroCards-Updater"})
-            with urllib.request.urlopen(req, timeout=8) as resp:
-                data = json.loads(resp.read().decode())
-            latest_tag = data.get("tag_name", "").lstrip("v")
-            if not latest_tag:
-                return
-            if _parse_version(latest_tag) > _parse_version(CURRENT_VERSION):
-                assets = data.get("assets", [])
-                dl_url = next(
-                    (a["browser_download_url"] for a in assets if a["name"] == "hero_cards.py"),
-                    None
-                )
-                callback(latest_tag, dl_url)
+            os.replace(SCRIPT_PATH, target)
+        except Exception as e:
+            QMessageBox.critical(None, "Update Error", f"Could not replace file:\n{e}")
+            sys.exit(1)
+        subprocess.Popen([sys.executable, target])
+        sys.exit(0)
+
+
+def cleanup_update_file():
+    """If hero_cards_update.py still exists, we just updated — clean it up."""
+    if os.path.exists(UPDATE_FILE):
+        try:
+            os.remove(UPDATE_FILE)
         except Exception:
             pass
-    threading.Thread(target=_check, daemon=True).start()
+        return True
+    return False
 
 
-def perform_update(url: str, new_version: str):
-    try:
-        backup = SCRIPT_PATH + ".bak"
-        shutil.copy2(SCRIPT_PATH, backup)
-        req = urllib.request.Request(url, headers={"User-Agent": "HeroCards-Updater"})
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            new_code = resp.read()
-        with open(SCRIPT_PATH, "wb") as f:
-            f.write(new_code)
-        subprocess.Popen([sys.executable, SCRIPT_PATH])
-        QApplication.quit()
-    except Exception as e:
-        QMessageBox.critical(None, "Update Failed", f"Could not apply update:\n{e}")
+def fetch_update_info():
+    """Returns (latest_version, download_url) or raises on failure."""
+    req = urllib.request.Request(GITHUB_API_URL, headers={"User-Agent": "HeroCards-Updater"})
+    with urllib.request.urlopen(req, timeout=8) as resp:
+        data = json.loads(resp.read().decode())
+    latest_tag = data.get("tag_name", "").lstrip("v")
+    assets = data.get("assets", [])
+    dl_url = next(
+        (a["browser_download_url"] for a in assets if a["name"] == "hero_cards.py"),
+        None
+    )
+    return latest_tag, dl_url
+
+
+def download_update(url: str):
+    """Downloads the update to hero_cards_update.py."""
+    req = urllib.request.Request(url, headers={"User-Agent": "HeroCards-Updater"})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        data = resp.read()
+    with open(UPDATE_FILE, "wb") as f:
+        f.write(data)
+
+
+# ─── Hero data ───────────────────────────────────────────────────────────────
 
 HEROES = [
-    {"name": "Aethon Blaze", "role": "Warrior", "hp": 920, "atk": 310, "def": 280, "rarity": "Legendary"},
-    {"name": "Vesper Shade", "role": "Assassin", "hp": 640, "atk": 480, "def": 140, "rarity": "Epic"},
-    {"name": "Ironhide Rex", "role": "Tank", "hp": 1400, "atk": 190, "def": 520, "rarity": "Rare"},
-    {"name": "Luna Frost", "role": "Mage", "hp": 580, "atk": 540, "def": 110, "rarity": "Legendary"},
-    {"name": "Drek the Bold", "role": "Warrior", "hp": 870, "atk": 300, "def": 260, "rarity": "Common"},
-    {"name": "Sylvara Wind", "role": "Ranger", "hp": 710, "atk": 410, "def": 180, "rarity": "Epic"},
-    {"name": "Colossus Prime", "role": "Tank", "hp": 1600, "atk": 160, "def": 600, "rarity": "Legendary"},
-    {"name": "Nixie Spark", "role": "Mage", "hp": 520, "atk": 590, "def": 90, "rarity": "Rare"},
-    {"name": "Grimshaw", "role": "Assassin", "hp": 600, "atk": 460, "def": 130, "rarity": "Common"},
-    {"name": "Thornback", "role": "Ranger", "hp": 760, "atk": 390, "def": 200, "rarity": "Rare"},
-    {"name": "Ember Vox", "role": "Mage", "hp": 560, "atk": 510, "def": 100, "rarity": "Epic"},
-    {"name": "Valdris Stone", "role": "Warrior", "hp": 900, "atk": 320, "def": 290, "rarity": "Common"},
+    {"name": "Aethon Blaze",  "role": "Warrior",  "hp": 920,  "atk": 310, "def": 280, "rarity": "Legendary"},
+    {"name": "Vesper Shade",  "role": "Assassin", "hp": 640,  "atk": 480, "def": 140, "rarity": "Epic"},
+    {"name": "Ironhide Rex",  "role": "Tank",     "hp": 1400, "atk": 190, "def": 520, "rarity": "Rare"},
+    {"name": "Luna Frost",    "role": "Mage",     "hp": 580,  "atk": 540, "def": 110, "rarity": "Legendary"},
+    {"name": "Drek the Bold", "role": "Warrior",  "hp": 870,  "atk": 300, "def": 260, "rarity": "Common"},
+    {"name": "Sylvara Wind",  "role": "Ranger",   "hp": 710,  "atk": 410, "def": 180, "rarity": "Epic"},
+    {"name": "Colossus Prime","role": "Tank",     "hp": 1600, "atk": 160, "def": 600, "rarity": "Legendary"},
+    {"name": "Nixie Spark",   "role": "Mage",     "hp": 520,  "atk": 590, "def": 90,  "rarity": "Rare"},
+    {"name": "Grimshaw",      "role": "Assassin", "hp": 600,  "atk": 460, "def": 130, "rarity": "Common"},
+    {"name": "Thornback",     "role": "Ranger",   "hp": 760,  "atk": 390, "def": 200, "rarity": "Rare"},
+    {"name": "Ember Vox",     "role": "Mage",     "hp": 560,  "atk": 510, "def": 100, "rarity": "Epic"},
+    {"name": "Valdris Stone", "role": "Warrior",  "hp": 900,  "atk": 320, "def": 290, "rarity": "Common"},
 ]
 
 RARITY_COLORS = {
@@ -89,6 +107,8 @@ ROLE_ICONS = {
     "Ranger":   "🏹",
 }
 
+
+# ─── UI Components ───────────────────────────────────────────────────────────
 
 class HeroCard(QFrame):
     def __init__(self, hero: dict, parent=None):
@@ -108,7 +128,6 @@ class HeroCard(QFrame):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(6)
 
-        # Rarity badge
         badge = QLabel(hero["rarity"].upper())
         badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         badge.setFont(QFont("Tahoma", 7))
@@ -121,7 +140,6 @@ class HeroCard(QFrame):
         """)
         layout.addWidget(badge)
 
-        # Avatar placeholder
         avatar = QLabel(ROLE_ICONS.get(hero["role"], "?"))
         avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
         avatar.setFont(QFont("Segoe UI Emoji", 36))
@@ -129,7 +147,6 @@ class HeroCard(QFrame):
         avatar.setStyleSheet("border: none;")
         layout.addWidget(avatar)
 
-        # Hero name
         name_lbl = QLabel(hero["name"])
         name_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         name_lbl.setFont(QFont("Tahoma", 10))
@@ -137,20 +154,17 @@ class HeroCard(QFrame):
         name_lbl.setWordWrap(True)
         layout.addWidget(name_lbl)
 
-        # Role
         role_lbl = QLabel(hero["role"])
         role_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         role_lbl.setFont(QFont("Tahoma", 8))
         role_lbl.setStyleSheet("color: #AAAAAA; border: none;")
         layout.addWidget(role_lbl)
 
-        # Divider
         div = QFrame()
         div.setFrameShape(QFrame.Shape.HLine)
         div.setStyleSheet(f"color: {rarity_color}; border: none; background: {rarity_color}; max-height: 1px;")
         layout.addWidget(div)
 
-        # Stats
         stats_layout = QVBoxLayout()
         stats_layout.setSpacing(2)
         for label, value, color in [
@@ -159,7 +173,7 @@ class HeroCard(QFrame):
             ("DEF", hero["def"], "#3498DB"),
         ]:
             row = QHBoxLayout()
-            lbl = QLabel(f"{label}")
+            lbl = QLabel(label)
             lbl.setFont(QFont("Tahoma", 8))
             lbl.setStyleSheet(f"color: {color}; border: none; font-weight: bold;")
             val = QLabel(f"{value:,}")
@@ -175,9 +189,10 @@ class HeroCard(QFrame):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, just_updated: bool):
         super().__init__()
-        self.setWindowTitle("Hero Cards  |  v1.0.0")
+        self._just_updated = just_updated
+        self.setWindowTitle(f"Hero Cards  |  v{CURRENT_VERSION}  —  Checking for updates...")
         self.setMinimumSize(900, 620)
 
         palette = self.palette()
@@ -215,31 +230,76 @@ class MainWindow(QMainWindow):
         scroll.setWidget(container)
         self.setCentralWidget(scroll)
 
-        QTimer.singleShot(1500, self._start_update_check)
+        QTimer.singleShot(500, self._run_update_check)
 
-    def _start_update_check(self):
-        check_for_update(self._on_update_found)
+    def _run_update_check(self):
+        if self._just_updated:
+            self.setWindowTitle(f"Hero Cards  |  v{CURRENT_VERSION}")
+            QMessageBox.information(self, "Updated!", f"Successfully updated to v{CURRENT_VERSION}!")
+            return
 
-    def _on_update_found(self, new_version: str, dl_url: str):
-        QTimer.singleShot(0, lambda: self._prompt_update(new_version, dl_url))
+        self._update_result = None
+        self._update_error = None
 
-    def _prompt_update(self, new_version: str, dl_url: str):
-        msg = QMessageBox(self)
-        msg.setWindowTitle("Update Available")
-        msg.setText(f"A new version is available: <b>v{new_version}</b><br>You are on v{CURRENT_VERSION}.<br><br>Update now?")
-        msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        msg.setDefaultButton(QMessageBox.StandardButton.Yes)
-        if msg.exec() == QMessageBox.StandardButton.Yes:
-            if dl_url:
-                perform_update(dl_url, new_version)
-            else:
-                QMessageBox.warning(self, "Update Error", "No downloadable asset found for this release.")
+        def _check():
+            try:
+                latest, url = fetch_update_info()
+                self._update_result = (latest, url)
+            except Exception as e:
+                self._update_error = str(e)
+            QTimer.singleShot(0, self._on_check_complete)
 
+        threading.Thread(target=_check, daemon=True).start()
+
+    def _on_check_complete(self):
+        if self._update_error:
+            self.setWindowTitle(f"Hero Cards  |  v{CURRENT_VERSION}")
+            QMessageBox.warning(self, "Update Check Failed", f"Could not check for updates:\n{self._update_error}")
+            return
+
+        latest, url = self._update_result
+        if not latest:
+            self.setWindowTitle(f"Hero Cards  |  v{CURRENT_VERSION}")
+            QMessageBox.information(self, "Up to Date", f"You're up to date! (v{CURRENT_VERSION})")
+            return
+
+        if _parse_version(latest) > _parse_version(CURRENT_VERSION):
+            self.setWindowTitle(f"Hero Cards  |  v{CURRENT_VERSION}")
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Update Available")
+            msg.setText(
+                f"A new version is available: <b>v{latest}</b><br>"
+                f"You are on v{CURRENT_VERSION}.<br><br>"
+                f"Download and install now?"
+            )
+            msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            msg.setDefaultButton(QMessageBox.StandardButton.Yes)
+
+            if msg.exec() == QMessageBox.StandardButton.Yes:
+                if not url:
+                    QMessageBox.warning(self, "Update Error", "No downloadable file found for this release.")
+                    return
+                try:
+                    download_update(url)
+                    subprocess.Popen([sys.executable, UPDATE_FILE])
+                    QApplication.quit()
+                except Exception as e:
+                    QMessageBox.critical(self, "Update Failed", f"Download failed:\n{e}")
+        else:
+            self.setWindowTitle(f"Hero Cards  |  v{CURRENT_VERSION}")
+            QMessageBox.information(self, "Up to Date", f"You're up to date! (v{CURRENT_VERSION})")
+
+
+# ─── Entry point ─────────────────────────────────────────────────────────────
 
 def main():
+    handle_update_file()
+
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
-    window = MainWindow()
+
+    just_updated = cleanup_update_file()
+    window = MainWindow(just_updated)
     window.show()
     sys.exit(app.exec())
 
