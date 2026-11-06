@@ -1,4 +1,4 @@
-# Version: 1.0.1
+# Version: 1.0.0
 
 import sys
 import os
@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QColor, QPalette
 
-CURRENT_VERSION = "1.0.1"
+CURRENT_VERSION = "1.0.0"
 GITHUB_API_URL = "https://api.github.com/repos/DanzaMenu/HeroCardsV1.0.0/releases/latest"
 SCRIPT_PATH = os.path.abspath(__file__)
 SCRIPT_DIR = os.path.dirname(SCRIPT_PATH)
@@ -29,15 +29,19 @@ def _parse_version(v: str):
 
 def handle_update_file():
     """If we were launched as _update.py, rename ourselves and relaunch."""
-    if SCRIPT_PATH.endswith("hero_cards_update.py"):
+    if os.path.basename(SCRIPT_PATH) == "hero_cards_update.py":
         target = os.path.join(SCRIPT_DIR, "hero_cards.py")
-        time.sleep(1)
+        time.sleep(1.5)
         try:
             os.replace(SCRIPT_PATH, target)
         except Exception as e:
-            QMessageBox.critical(None, "Update Error", f"Could not replace file:\n{e}")
+            print(f"[updater] replace failed: {e}", file=sys.stderr)
             sys.exit(1)
-        subprocess.Popen([sys.executable, target])
+        subprocess.Popen(
+            [sys.executable, target],
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+            close_fds=True,
+        )
         sys.exit(0)
 
 
@@ -193,7 +197,6 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._just_updated = just_updated
         self.setWindowTitle(f"Hero Cards  |  v{CURRENT_VERSION}  —  Checking for updates...")
-        # 1.0.1
         self.setMinimumSize(900, 620)
 
         palette = self.palette()
@@ -282,7 +285,11 @@ class MainWindow(QMainWindow):
                     return
                 try:
                     download_update(url)
-                    subprocess.Popen([sys.executable, UPDATE_FILE])
+                    subprocess.Popen(
+                        [sys.executable, UPDATE_FILE],
+                        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+                        close_fds=True,
+                    )
                     QApplication.quit()
                 except Exception as e:
                     QMessageBox.critical(self, "Update Failed", f"Download failed:\n{e}")
